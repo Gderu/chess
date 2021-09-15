@@ -1,7 +1,39 @@
-use chess::logic::LogicManager;
-use chess::gui::print_board_ascii;
+pub mod logic;
+pub mod gui;
+
+use logic::piece::{Board};
+use logic::LogicManager;
+use gui::*;
+use bevy_prototype_lyon::plugin::ShapePlugin;
+use bevy::audio::AudioPlugin;
 
 fn main() {
+    App::build()
+        .insert_resource(WindowDescriptor {
+            title: "Chess".to_string(),
+            width: SCREEN_LEN,
+            height: SCREEN_LEN,
+            ..Default::default()
+        })
+        .insert_resource(LogicManager::new())
+        .insert_resource(Turn(true))
+        .add_startup_system(setup.system())
+        .add_stage_after(CoreStage::Update, StageLabels::MouseClicks, SystemStage::single_threaded())
+        .add_stage_after(StageLabels::MouseClicks, StageLabels::MoveCalculation, SystemStage::single_threaded())
+        .add_stage_after(StageLabels::MoveCalculation, StageLabels::PositionCalculation, SystemStage::single_threaded())
+        .add_system_to_stage(StageLabels::MouseClicks, mouse_clicks.system())
+        .add_system_to_stage(StageLabels::MoveCalculation, piece_options.system())
+        .add_system_to_stage(StageLabels::MoveCalculation, move_piece.system())
+        .add_system_to_stage(StageLabels::PositionCalculation, position_translation.system())
+        .add_plugins(DefaultPlugins)
+        .add_plugin(ShapePlugin)
+        .add_plugin(bevy_kira_audio::AudioPlugin)
+        .add_event::<PieceOption>()
+        .add_event::<Move>()
+        .run();
+}
+
+fn cli_chess() {
     let mut lm = LogicManager::new();
     let mut buf = String::new();
     let mut turn = true;
@@ -23,4 +55,17 @@ fn main() {
         println!("is check: {}\nis checkmate: {}", lm.is_check(turn), lm.is_checkmate(turn));
         turn = !turn;
     }
+}
+
+fn print_board_ascii(board: &Board) {
+    for row in board {
+        for sqr in row {
+            match &sqr {
+                Some(p) => p.print(),
+                None => print!("{}", "."),
+            }
+        }
+        println!();
+    }
+    println!();
 }

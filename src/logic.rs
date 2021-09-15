@@ -14,6 +14,7 @@ use bishop::Bishop;
 use queen::Queen;
 use king::King;
 
+
 pub struct LogicManager {
     board: Board,
     curr_selected: (i8, i8),
@@ -55,6 +56,7 @@ impl LogicManager {
 
     //gets all possible moves for a piece at pos. Returns None if there is no piece there. Must be called before moving
     pub fn get_possible_moves(&mut self, pos: (i8, i8)) -> Option<&Vec<(i8, i8)>> {
+        println!("{:?}", pos);
         if self.curr_selected != (-1, -1) {
             self.possible_moves.clear();
         }
@@ -71,7 +73,8 @@ impl LogicManager {
     }
 
     //moves a piece to new_pos. Must be called after get_possible_moves
-    pub fn move_piece(&mut self, new_pos: (i8, i8)) {
+    pub fn move_piece(&mut self, new_pos: (i8, i8)) -> Option<((i8, i8), (i8, i8))> {
+        let mut to_return = None;
         let first_move = self.get_piece(self.curr_selected).is_first_move();
         let used_en_passant = self.get_piece(self.curr_selected).took_using_en_passant(new_pos, &self.board);
         if used_en_passant {
@@ -83,6 +86,7 @@ impl LogicManager {
             if let Some(piece_taken) = self.board[(new_pos.0 - 1) as usize][new_pos.1 as usize].as_ref() {
                 if !piece_taken.possible_en_passant().is_none() && piece_taken.color() == true {
                     self.board[(new_pos.0 - 1) as usize][new_pos.1 as usize] = None;
+                    to_return = Some((((new_pos.0 - 1), new_pos.1), (-1, -1)));
                 }
             }
         }
@@ -106,17 +110,17 @@ impl LogicManager {
             }
             println!("{:?}, {:?}, {:?}", first_move, new_pos, (pos.0, 6));
             if first_move && new_pos == (pos.0, 6) {
-                println!("IN!");
                 self.get_mut_piece((pos.0, 7)).move_piece((pos.0, 5));//telling the piece it has moved
                 self.board[pos.0 as usize][5] =
                     Some(self.board[pos.0 as usize][7].as_ref().unwrap().clone());
                 self.board[pos.0 as usize][7] = None;//moving the piece on the board
+                to_return = Some(((pos.0, 7), (pos.0, 5)));
             } else if first_move && new_pos == (pos.0, 2) {
-                println!("IN2");
                 self.get_mut_piece((pos.0, 0)).move_piece((pos.0, 3));//telling the piece it has moved
                 self.board[pos.0 as usize][3] =
                     Some(self.board[pos.0 as usize][0].as_ref().unwrap().clone());
                 self.board[pos.0 as usize][0] = None;//moving the piece on the board
+                to_return = Some(((pos.0, 0), (pos.0, 3)));
             }
         }
 
@@ -124,6 +128,7 @@ impl LogicManager {
             Some(self.board[self.curr_selected.0 as usize][self.curr_selected.1 as usize].as_ref().unwrap().clone());
         self.board[self.curr_selected.0 as usize][self.curr_selected.1 as usize] = None;//moving the piece on the board
         self.curr_selected = (-1, -1);
+        to_return
     }
 
     pub fn is_in_possible_moves(&self, pos: (i8, i8)) -> bool {
@@ -150,6 +155,23 @@ impl LogicManager {
             .is_checkmate(&self.board, &self.en_passant, other_king_pos)
     }
 
+    pub fn can_move(&self) -> bool {
+        self.curr_selected != (-1, -1)
+    }
+
+    pub fn clear_selection(&mut self) {
+        self.possible_moves.clear();
+        self.curr_selected = (-1, -1);
+    }
+
+    pub fn get_piece_color(&self, pos: (i8, i8)) -> Option<bool> {
+        if let Some(piece) = self.board[pos.0 as usize][pos.1 as usize].as_ref() {
+            Some(self.get_piece(pos).color())
+        } else {
+            None
+        }
+    }
+
     fn get_piece(&self, pos: (i8, i8)) -> &Box<dyn Piece> {
         if let Some(piece) = self.board[pos.0 as usize][pos.1 as usize].as_ref() {
             piece
@@ -170,4 +192,11 @@ impl LogicManager {
         let i = match color { false => 0, true => 7};
         vec![Rook::new((i, 0), color), Knight::new((i, 1), color), Bishop::new((i, 2), color), Queen::new((i, 3), color), King::new((i, 4), color), Bishop::new((i, 5), color), Knight::new((i, 6), color), Rook::new((i, 7), color)]
     }
+
+    fn is_pos_empty(&self, pos: (i8, i8)) -> bool {
+        self.board[pos.0 as usize][pos.1 as usize].is_none()
+    }
 }
+
+unsafe impl Send for LogicManager {}
+unsafe impl Sync for LogicManager {}
