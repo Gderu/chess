@@ -1,4 +1,4 @@
-use super::piece::{Piece, Board, is_valid_pos};
+use super::piece::{Piece, Board, is_valid_pos, PieceTypes};
 use colored::*;
 use super::King;
 use std::any::Any;
@@ -62,5 +62,9 @@ impl Piece for Rook {
 
     fn is_first_move(&self) -> bool {
         self.first_move
+    }
+
+    fn piece_type(&self) -> PieceTypes {
+        PieceTypes::Rook
     }
 }

@@ -1,4 +1,4 @@
-use super::piece::{Piece, Board, is_valid_pos};
+use super::piece::{Piece, Board, is_valid_pos, PieceTypes};
 use colored::*;
 use super::King;
 use std::any::Any;
@@ -58,5 +58,9 @@ impl Piece for Bishop {
 
     fn as_any(&self) -> &dyn Any {
         self
+    }
+
+    fn piece_type(&self) -> PieceTypes {
+        PieceTypes::Bishop
     }
 }

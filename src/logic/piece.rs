@@ -1,6 +1,16 @@
 pub type Board = Vec<Vec<Option<Box<dyn Piece>>>>;
 use std::any::Any;
 
+#[derive(Eq, PartialEq, Copy, Clone)]
+pub enum PieceTypes {
+    King,
+    Queen,
+    Rook,
+    Bishop,
+    Knight,
+    Pawn,
+}
+
 pub fn is_valid_pos(pos: (i8, i8)) -> bool {
     pos.0 < 8 && pos.0 >= 0 && pos.1 < 8 && pos.1 >= 0
 }
@@ -9,9 +19,7 @@ pub trait Piece {
     //Gets position and color of piece, returns piece object
     fn new(pos: (i8, i8), color: bool) -> Option<Box<dyn Piece>> where Self: Sized;
     //checks if the piece is a king
-    fn is_king(&self) -> bool {
-        false
-    }
+    fn piece_type(&self) -> PieceTypes;
     //prints the piece in ascii
     fn print(&self);
     //returns the color of the piece, true is white, false is black

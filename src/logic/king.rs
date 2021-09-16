@@ -1,4 +1,4 @@
-use super::{Piece, Board, piece::is_valid_pos};
+use super::{Piece, Board, piece::is_valid_pos, PieceTypes};
 use colored::*;
 use std::any::Any;
 
@@ -13,10 +13,6 @@ pub struct King {
 impl Piece for King {
     fn new(pos: (i8, i8), color: bool) -> Option<Box<dyn Piece>> {
         Some(Box::new(King { pos, color, first_move: true }))
-    }
-
-    fn is_king(&self) -> bool {
-        true
     }
 
     fn print(&self) {
@@ -96,6 +92,10 @@ impl Piece for King {
 
     fn is_first_move(&self) -> bool {
         self.first_move
+    }
+
+    fn piece_type(&self) -> PieceTypes {
+        PieceTypes::King
     }
 }
 
