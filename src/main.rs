@@ -5,7 +5,6 @@ use logic::piece::{Board};
 use logic::LogicManager;
 use gui::*;
 use bevy_prototype_lyon::plugin::ShapePlugin;
-use bevy::audio::AudioPlugin;
 
 fn main() {
     App::build()
@@ -17,6 +16,8 @@ fn main() {
         })
         .insert_resource(LogicManager::new())
         .insert_resource(Turn(true))
+        .insert_resource(Capture(false))
+        .insert_resource(Moved(false))
         .insert_resource(PromotePawnOption {
             happened: false,
             new_pos: (-1, -1),
@@ -25,11 +26,13 @@ fn main() {
         .add_stage_after(CoreStage::Update, StageLabels::MouseClicks, SystemStage::single_threaded())
         .add_stage_after(StageLabels::MouseClicks, StageLabels::MoveCalculation, SystemStage::single_threaded())
         .add_stage_after(StageLabels::MoveCalculation, StageLabels::PositionCalculation, SystemStage::single_threaded())
+        .add_stage_after(StageLabels::PositionCalculation, StageLabels::Audio, SystemStage::single_threaded())
         .add_system_to_stage(StageLabels::MouseClicks, mouse_clicks.system())
         .add_system_to_stage(StageLabels::MoveCalculation, piece_options.system())
         .add_system_to_stage(StageLabels::MoveCalculation, move_piece.system())
         .add_system_to_stage(StageLabels::MoveCalculation, promote_pawn_choice.system())
         .add_system_to_stage(StageLabels::PositionCalculation, position_translation.system())
+        .add_system_to_stage(StageLabels::Audio, play_audio.system())
         .add_plugins(DefaultPlugins)
         .add_plugin(ShapePlugin)
         .add_plugin(bevy_kira_audio::AudioPlugin)
@@ -47,12 +50,18 @@ fn cli_chess() {
         print_board_ascii(lm.get_board());
         println!("What would you like to move?");
         buf.clear();
-        std::io::stdin().read_line(&mut buf);
+        match std::io::stdin().read_line(&mut buf){
+            Ok(_) => (),
+            Err(e) => panic!("Error occurred: {:?}", e),
+        }
         let poss_moves = lm.get_possible_moves((56 - buf.as_bytes()[1] as i8, buf.as_bytes()[0] as i8 - 97));
         println!("{:?}", poss_moves);
         println!("where would you like to move?");
         buf.clear();
-        std::io::stdin().read_line(&mut buf);
+        match std::io::stdin().read_line(&mut buf){
+            Ok(_) => (),
+            Err(e) => panic!("Error occurred: {:?}", e),
+        }
         if buf.as_bytes().len() < 2 || !poss_moves.unwrap().contains(&(56 - buf.as_bytes()[1] as i8, buf.as_bytes()[0] as i8 - 97)) {
             println!("not possible move");
             continue;

@@ -3,13 +3,11 @@ pub use bevy::{prelude::*};
 use bevy::input::mouse::MouseButtonInput;
 use bevy_prototype_lyon::prelude::*;
 pub use bevy_kira_audio::{Audio, AudioPlugin, AudioSource};
-use std::ops::DerefMut;
 use crate::logic::piece::PieceTypes;
 
 pub const SCREEN_LEN: f32 = 650.;
 const NUM_SQUARES: f32 = 8.;
 const SQUARE_SIZE: f32 = SCREEN_LEN / NUM_SQUARES;
-const INVALID_VALUE: usize = 100;
 
 const HIDDEN_LAYER: usize = 0;
 const TILES_LAYER: usize = 1;
@@ -49,6 +47,8 @@ pub struct MoveSounds {
 }
 
 pub struct Turn(pub bool);
+pub struct Moved(pub bool);
+pub struct Capture(pub bool);
 
 pub struct PromotePawnOption {
     pub happened: bool,
@@ -75,6 +75,7 @@ pub enum StageLabels {
     MouseClicks,
     MoveCalculation,
     PositionCalculation,
+    Audio,
 }
 
 pub fn setup(
@@ -182,10 +183,6 @@ fn spawn_pieces(
 }
 
 fn get_path(x: usize, color: &str) -> (String, PieceTypes) {
-    let color_bool = match color {
-        "dark" => false,
-        _ => true,
-    };
     if x == 0 {
         (color.to_string() + "_rook.png", PieceTypes::Rook)
     } else if x == 1 {
@@ -223,10 +220,10 @@ pub fn mouse_clicks (
     mut move_writer: EventWriter<MoveEvent>,
     mut piece_option_writer: EventWriter<PieceOptionEvent>,
     mut pawn_promotion_writer: EventWriter<PawnPromotionEvent>,
-    mut turn: Res<Turn>,
+    turn: Res<Turn>,
     query_hint: Query<(&Position, Entity), With<Hint>>,
     query_selected: Query<(&Position, Entity), With<Selected>>,
-    mut promote_pawn_option: ResMut<PromotePawnOption>,
+    promote_pawn_option: Res<PromotePawnOption>,
 ) {
     let window = windows.get_primary().unwrap();
     for ev in evr_mousebtn.iter() {
@@ -327,19 +324,18 @@ pub fn move_piece(
     mut commands: Commands,
     mut move_reader: EventReader<MoveEvent>,
     mut query_pieces: Query<(&mut Position, Entity, &Piece)>,
-    mut query_last_move: Query<Entity, With<LastMove>>,
+    query_last_move: Query<Entity, With<LastMove>>,
     mut lm: ResMut<LogicManager>,
-    mut turn: ResMut<Turn>,
-    audio: Res<Audio>,
-    move_sounds: Res<MoveSounds>,
+    turn: Res<Turn>,
     bc: Res<BackgroundColors>,
     server: Res<AssetServer>,
     mut materials: ResMut<Assets<ColorMaterial>>,
     mut promote_pawn_option: ResMut<PromotePawnOption>,
+    mut capture: ResMut<Capture>,
+    mut moved: ResMut<Moved>,
 ) {
     if let Some(move_event) = move_reader.iter().next() {
         let (prev_pos, new_pos) = move_event.0;
-        let mut to_play = move_sounds.move_self.clone();
 
         for (mut pos, e, piece) in query_pieces.iter_mut() {
             if (pos.y as i8, pos.x as i8) == prev_pos && piece.piece_type == PieceTypes::Pawn && [0, 7].contains(&new_pos.0) {
@@ -350,23 +346,20 @@ pub fn move_piece(
                 pos.z = HIDDEN_LAYER;
                 return;
             }
-            if (pos.y as i8, pos.x as i8) == new_pos {
-                commands.entity(e).despawn();
-                to_play = move_sounds.capture.clone();
-            }
         }
 
         let res = lm.move_piece(new_pos);
+        moved.0 = true;
         for (mut pos, e, _piece) in query_pieces.iter_mut() {
             if (pos.y as i8, pos.x as i8) == new_pos {
                 commands.entity(e).despawn();
-                to_play = move_sounds.capture.clone();
+                capture.0 = true;
             }
             if let Some((other_prev_pos, other_new_pos)) = res {
                 if (pos.y as i8, pos.x as i8) == other_prev_pos {
                     if other_new_pos == (-1, -1) {
                         commands.entity(e).despawn();
-                        to_play = move_sounds.capture.clone();
+                        capture.0 = true;
                     } else {
                         pos.x = other_new_pos.1 as usize;
                         pos.y = other_new_pos.0 as usize;
@@ -381,14 +374,6 @@ pub fn move_piece(
                 pos.y = new_pos.0 as usize;
             }
         }
-        if lm.is_check(turn.0) {
-            to_play = move_sounds.check.clone();
-        }
-        if lm.is_checkmate(turn.0) {
-            to_play = move_sounds.checkmate.clone();
-        }
-        audio.play(to_play);
-        turn.0 = !turn.0;
 
         for e in query_last_move.iter() {
             commands.entity(e).despawn();
@@ -461,12 +446,14 @@ pub fn promote_pawn_choice(
     query_pawn_promotion: Query<Entity, With<PromotePawn>>,
     query_last_move: Query<Entity, With<LastMove>>,
     mut query_hidden: Query<(&mut Position, Entity), With<Hidden>>,
-    mut query_pieces: Query<(&Position, Entity), (With<Piece>, Without<Hidden>)>,
-    mut turn: ResMut<Turn>,
+    query_pieces: Query<(&Position, Entity), (With<Piece>, Without<Hidden>)>,
+    turn: Res<Turn>,
     mut promote_pawn_option: ResMut<PromotePawnOption>,
     mut materials: ResMut<Assets<ColorMaterial>>,
-    mut server: ResMut<AssetServer>,
+    server: Res<AssetServer>,
     bc: Res<BackgroundColors>,
+    mut capture: ResMut<Capture>,
+    mut moved: ResMut<Moved>,
 ) {
     if let Some(pawn_promotion_event) = pawn_promotion_reader.iter().next() {
         let pos_clicked = pawn_promotion_event.0;
@@ -480,6 +467,7 @@ pub fn promote_pawn_choice(
         let mut promoted = false;
         if new_pos.1 == pos_clicked.1 {
             if let Some(index) = range.iter().position(|r| *r == pos_clicked.0) {
+                moved.0 = true;
                 println!("{}", index);
                 promoted = true;
                 let piece_type_usize: usize = *piece_types.get(index).unwrap();
@@ -506,7 +494,6 @@ pub fn promote_pawn_choice(
                     .insert(Piece {
                         piece_type,
                     });
-                turn.0 = !turn.0;
 
                 for e in query_last_move.iter() {
                     commands.entity(e).despawn();
@@ -515,6 +502,7 @@ pub fn promote_pawn_choice(
                 for (pos, e) in query_pieces.iter() {
                     if pos.x == new_pos.1 as usize && pos.y == new_pos.0 as usize {
                         commands.entity(e).despawn();
+                        capture.0 = true;
                     }
                 }
                 commands
@@ -545,5 +533,31 @@ pub fn promote_pawn_choice(
             commands.entity(e).despawn();
         }
         promote_pawn_option.happened = false;
+    }
+}
+
+pub fn play_audio(
+    mut turn: ResMut<Turn>,
+    move_sounds: Res<MoveSounds>,
+    lm: Res<LogicManager>,
+    mut capture: ResMut<Capture>,
+    mut moved: ResMut<Moved>,
+    audio: Res<Audio>,
+){
+    if moved.0 {
+        let mut to_play = match capture.0 {
+            true => move_sounds.capture.clone(),
+            false => move_sounds.move_self.clone(),
+        };
+        if lm.is_check(turn.0) {
+            to_play = move_sounds.check.clone();
+        }
+        if lm.is_checkmate(turn.0) {
+            to_play = move_sounds.checkmate.clone();
+        }
+        audio.play(to_play);
+        turn.0 = !turn.0;
+        capture.0 = false;
+        moved.0 = false;
     }
 }

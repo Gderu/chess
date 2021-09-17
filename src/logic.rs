@@ -179,7 +179,7 @@ impl LogicManager {
     }
 
     pub fn get_piece_color(&self, pos: (i8, i8)) -> Option<bool> {
-        if let Some(piece) = self.board[pos.0 as usize][pos.1 as usize].as_ref() {
+        if let Some(_piece) = self.board[pos.0 as usize][pos.1 as usize].as_ref() {
             Some(self.get_piece(pos).color())
         } else {
             None
