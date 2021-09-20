@@ -5,9 +5,24 @@ use bevy_prototype_lyon::prelude::*;
 pub use bevy_kira_audio::{Audio, AudioPlugin, AudioSource};
 use crate::logic::piece::PieceTypes;
 
-pub const SCREEN_LEN: f32 = 650.;
+pub use bevy::{
+    prelude::*,
+    render::{
+        camera::{ActiveCameras, Camera},
+        pass::*,
+        render_graph::{
+            base::MainPass, CameraNode, PassNode, RenderGraph, WindowSwapChainNode,
+            WindowTextureNode,
+        },
+        texture::{Extent3d, TextureDescriptor, TextureDimension, TextureFormat, TextureUsage},
+    },
+    window::{CreateWindow, WindowDescriptor, WindowId},
+};
+
+pub const SCREEN_HEIGHT: f32 = 650.;
+pub const SCREEN_WIDTH: f32 = 800.;
 const NUM_SQUARES: f32 = 8.;
-const SQUARE_SIZE: f32 = SCREEN_LEN / NUM_SQUARES;
+const SQUARE_SIZE: f32 = SCREEN_HEIGHT / NUM_SQUARES;
 
 const HIDDEN_LAYER: usize = 0;
 const TILES_LAYER: usize = 1;
@@ -16,6 +31,13 @@ const HINTS_LAYER: usize = 3;
 const PIECES_LAYER: usize = 4;
 const PAWN_PROMOTION_BACKGROUND_LAYER: usize = 5;
 const PAWN_PROMOTION_PIECES_LAYER: usize = 6;
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub enum AppState {
+    CreateWindow,
+    Setup,
+    Done,
+}
 
 #[derive(Copy, Clone)]
 pub struct Position {
@@ -42,7 +64,7 @@ pub struct BackgroundColors {
 pub struct MoveSounds {
     pub move_self: Handle<AudioSource>,
     pub capture: Handle<AudioSource>,
-    pub checkmate: Handle<AudioSource>,
+    pub game_end: Handle<AudioSource>,
     pub check: Handle<AudioSource>,
 }
 
@@ -75,7 +97,7 @@ pub enum StageLabels {
     MouseClicks,
     MoveCalculation,
     PositionCalculation,
-    Audio,
+    AfterTurnUpdates,
 }
 
 pub fn setup(
@@ -93,8 +115,9 @@ pub fn setup(
         capture: server.load("capture.mp3"),
         move_self: server.load("move-self.mp3"),
         check: server.load("move-check.mp3"),
-        checkmate: server.load("game-end.mp3"),
+        game_end: server.load("game-end.mp3"),
     };
+    commands.spawn_bundle(UiCameraBundle::default());
     commands.spawn_bundle(OrthographicCameraBundle::new_2d());
     commands.insert_resource(bc.clone());
     commands.insert_resource(ms.clone());
@@ -202,11 +225,15 @@ fn get_path(x: usize, color: &str) -> (String, PieceTypes) {
     }
 }
 
-pub fn position_translation(mut q: Query<(&Position, &mut Transform)>) {
+pub fn position_translation(
+    mut q: Query<(&Position, &mut Transform)>,
+    windows: Res<Windows>,
+) {
+    let window = windows.get_primary().unwrap();
     for (pos, mut transform) in q.iter_mut() {
         transform.translation = Vec3::new(
-            pos.x as f32 / NUM_SQUARES * SCREEN_LEN - (SCREEN_LEN / 2.) + (SQUARE_SIZE / 2.),
-            (SCREEN_LEN / 2.) - pos.y as f32 / NUM_SQUARES * SCREEN_LEN - (SQUARE_SIZE / 2.),
+            pos.x as f32 / NUM_SQUARES * window.height() - (window.width() / 2.) + (SQUARE_SIZE / 2.),
+            (window.height() / 2.) - pos.y as f32 / NUM_SQUARES * window.height() - (SQUARE_SIZE / 2.),
             pos.z as f32,
         );
     }
@@ -230,6 +257,9 @@ pub fn mouse_clicks (
         if ev.state.is_pressed() {
             if let Some(position) = window.cursor_position() {
                 let pos = get_sqr(position);
+                if pos.0 > 7 || pos.0 < 0 || pos.1 > 7 || pos.0 < 0 {
+                    return;
+                }
                 let hint_positions = query_hint.iter().map(|(p, _e)| (p.y as i8, p.x as i8)).collect::<Vec<(i8, i8)>>();
                 let selected_position = query_selected.iter().map(|(p, _e)| (p.y as i8, p.x as i8)).collect::<Vec<(i8, i8)>>();
                 for (_p, e) in query_hint.iter() {
@@ -264,7 +294,7 @@ pub fn mouse_clicks (
 }
 
 fn get_sqr(pos: Vec2) -> (i8, i8) {
-    (7 - (pos.y * NUM_SQUARES / SCREEN_LEN).floor() as i8, (pos.x * NUM_SQUARES / SCREEN_LEN).floor() as i8)
+    (7 - (pos.y * NUM_SQUARES / SCREEN_HEIGHT).floor() as i8, (pos.x * NUM_SQUARES / SCREEN_HEIGHT).floor() as i8)
 }
 
 pub fn piece_options(
@@ -536,28 +566,258 @@ pub fn promote_pawn_choice(
     }
 }
 
-pub fn play_audio(
+pub fn after_turn_updates(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
     mut turn: ResMut<Turn>,
     move_sounds: Res<MoveSounds>,
-    lm: Res<LogicManager>,
+    mut lm: ResMut<LogicManager>,
     mut capture: ResMut<Capture>,
     mut moved: ResMut<Moved>,
     audio: Res<Audio>,
+    mut windows: ResMut<Windows>,
 ){
     if moved.0 {
         let mut to_play = match capture.0 {
             true => move_sounds.capture.clone(),
             false => move_sounds.move_self.clone(),
         };
+        let is_draw = lm.is_draw();
         if lm.is_check(turn.0) {
             to_play = move_sounds.check.clone();
         }
-        if lm.is_checkmate(turn.0) {
-            to_play = move_sounds.checkmate.clone();
+        if lm.is_checkmate(turn.0) || is_draw {
+            lm.stop();
+            let window = windows.get_primary_mut().unwrap();
+            window.set_resolution(SCREEN_WIDTH, SCREEN_HEIGHT);
+            to_play = move_sounds.game_end.clone();
+            let to_display;
+            if is_draw {
+                to_display = "Draw";
+            } else if turn.0 == true {
+                to_display = "White\nwins";
+            } else {
+                to_display = "Black\nwins";
+            }
+            commands
+                .spawn_bundle(TextBundle {
+                    style: Style {
+                        align_self: AlignSelf::FlexEnd,
+                        position_type: PositionType::Absolute,
+                        position: Rect {
+                            bottom: Val::Px(SCREEN_HEIGHT / 2. - 50.),
+                            right: Val::Px(25.0),
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    },
+                    // Use the `Text::with_section` constructor
+                    text: Text::with_section(
+                        // Accepts a `String` or any type that converts into a `String`, such as `&str`
+                        to_display,
+                        TextStyle {
+                            font: asset_server.load("FiraSans-Bold.ttf"),
+                            font_size: 50.0,
+                            color: Color::WHITE,
+                        },
+                        // Note: You can use `Default::default()` in place of the `TextAlignment`
+                        TextAlignment {
+                            horizontal: HorizontalAlign::Right,
+                            ..Default::default()
+                        },
+                    ),
+                    ..Default::default()
+                });
         }
         audio.play(to_play);
         turn.0 = !turn.0;
         capture.0 = false;
         moved.0 = false;
     }
+}
+
+pub fn create_result_window(
+    mut create_window_events: EventWriter<CreateWindow>,
+    mut app_state: ResMut<State<AppState>>,
+) {
+    let window_id = WindowId::new();
+    // sends out a "CreateWindow" event, which will be received by the windowing backend
+    create_window_events.send(CreateWindow {
+        id: window_id,
+        descriptor: WindowDescriptor {
+            width: 1000.,
+            height: 1000.,
+            vsync: false,
+            title: "second window".to_string(),
+            ..Default::default()
+        },
+    });
+    app_state.set(AppState::Setup).unwrap();
+}
+
+pub fn setup_result_window(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    mut active_cameras: ResMut<ActiveCameras>,
+    mut render_graph: ResMut<RenderGraph>,
+    msaa: Res<Msaa>,
+    windows: Res<Windows>,
+    mut app_state: ResMut<State<AppState>>,
+) {
+
+    // let to_display = match draw {
+    //     true => "Draw",
+    //     false => match turn {
+    //         true => "White wins",
+    //         false => "Black wins",
+    //     }
+    // };
+    let to_display = "Its working!";
+    // get the non-default window id
+    // get the non-default window id
+    let window_id_old = windows
+        .iter()
+        .find(|w| w.id() != WindowId::default())
+        .map(|w| w.id());
+    let window_id;
+    window_id = match window_id_old {
+        Some(window_id_old) => window_id_old,
+        None => return,
+    };
+
+
+    // here we setup our render graph to draw our second camera to the new window's swap chain
+
+    // add a swapchain node for our new window1
+    render_graph.add_node(
+        "second_window_swap_chain",
+        WindowSwapChainNode::new(window_id),
+    );
+
+    // add a new depth texture node for our new window
+    render_graph.add_node(
+        "second_window_depth_texture",
+        WindowTextureNode::new(
+            window_id,
+            TextureDescriptor {
+                format: TextureFormat::Depth32Float,
+                usage: TextureUsage::OUTPUT_ATTACHMENT,
+                sample_count: msaa.samples,
+                ..Default::default()
+            },
+        ),
+    );
+
+    // add a new camera node for our new window
+    render_graph.add_system_node("secondary_camera", CameraNode::new("Secondary"));
+
+    // add a new render pass for our new window / camera
+    let mut second_window_pass = PassNode::<&MainPass>::new(PassDescriptor {
+        color_attachments: vec![msaa.color_attachment_descriptor(
+            TextureAttachment::Input("color_attachment".to_string()),
+            TextureAttachment::Input("color_resolve_target".to_string()),
+            Operations {
+                load: LoadOp::Clear(Color::rgb(1., 1., 1.)),
+                store: true,
+            },
+        )],
+        depth_stencil_attachment: Some(RenderPassDepthStencilAttachmentDescriptor {
+            attachment: TextureAttachment::Input("depth".to_string()),
+            depth_ops: Some(Operations {
+                load: LoadOp::Clear(1.0),
+                store: true,
+            }),
+            stencil_ops: None,
+        }),
+        sample_count: msaa.samples,
+    });
+
+    second_window_pass.add_camera("Secondary");
+    active_cameras.add("Secondary");
+
+    render_graph.add_node("second_window_pass", second_window_pass);
+
+    render_graph
+        .add_slot_edge(
+            "second_window_swap_chain",
+            WindowSwapChainNode::OUT_TEXTURE,
+            "second_window_pass",
+            if msaa.samples > 1 {
+                "color_resolve_target"
+            } else {
+                "color_attachment"
+            },
+        )
+        .unwrap();
+
+    render_graph
+        .add_slot_edge(
+            "second_window_depth_texture",
+            WindowTextureNode::OUT_TEXTURE,
+            "second_window_pass",
+            "depth",
+        )
+        .unwrap();
+
+    render_graph
+        .add_node_edge("secondary_camera", "second_window_pass")
+        .unwrap();
+
+    if msaa.samples > 1 {
+        render_graph.add_node(
+            "second_multi_sampled_color_attachment",
+            WindowTextureNode::new(
+                window_id,
+                TextureDescriptor::default(),
+            ),
+        );
+
+        render_graph
+            .add_slot_edge(
+                "second_multi_sampled_color_attachment",
+                WindowSwapChainNode::OUT_TEXTURE,
+                "second_window_pass",
+                "color_attachment",
+            )
+            .unwrap();
+    }
+    commands.spawn_bundle(UiCameraBundle {
+        camera: Camera {
+            name: Some("Secondary".to_string()),
+            window: window_id,
+            ..Default::default()
+        },
+        transform: Transform::from_xyz(0.0, 0.0, 1000. - 0.1),
+        ..Default::default()
+    });
+    commands
+        .spawn_bundle(TextBundle {
+            style: Style {
+                align_self: AlignSelf::FlexEnd,
+                position_type: PositionType::Absolute,
+                position: Rect {
+                    bottom: Val::Px(5.0),
+                    right: Val::Px(15.0),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            // Use the `Text::with_section` constructor
+            text: Text::with_section(
+                // Accepts a `String` or any type that converts into a `String`, such as `&str`
+                "hello\nbevy!",
+                TextStyle {
+                    font: asset_server.load("FiraSans-Bold.ttf"),
+                    font_size: 100.0,
+                    color: Color::BLACK,
+                },
+                // Note: You can use `Default::default()` in place of the `TextAlignment`
+                TextAlignment {
+                    horizontal: HorizontalAlign::Center,
+                    ..Default::default()
+                },
+            ),
+            ..Default::default()
+        });
+    app_state.set(AppState::Done).unwrap();
 }

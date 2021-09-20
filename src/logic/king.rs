@@ -34,20 +34,19 @@ impl Piece for King {
 
     fn get_possible_moves(&self, board: &Board, en_passant: &Option<(i8, i8)>, _king_pos: (i8, i8), already_called: bool) -> Vec<(i8, i8)> {
         let mut possible_moves = vec![];
-        for dir in [(1, 1), (-1, 1), (1, -1), (-1, -1), (1, 0), (-1, 0), (0, 1), (0, -1)] {//calculating diagonals
+        for dir in [(1, 1), (-1, 1), (1, -1), (-1, -1), (1, 0), (-1, 0), (0, 1), (0, -1)] {
             let to_check = (self.pos.0 + dir.0, self.pos.1 + dir.1);
             if !is_valid_pos(to_check) {
                 continue;
             }
-            if already_called || self.is_check(&board, self.pos, to_check, en_passant, to_check) {
-                continue;
-            }
-            if let Some(piece) = board[to_check.0 as usize][to_check.1 as usize].as_ref() {
-                if piece.color() != self.color {
+            if already_called || !self.is_check(&board, self.pos, to_check, en_passant, to_check) {
+                if let Some(piece) = board[to_check.0 as usize][to_check.1 as usize].as_ref() {
+                    if piece.color() != self.color {
+                        possible_moves.push(to_check);
+                    }
+                } else {
                     possible_moves.push(to_check);
                 }
-            } else {
-                possible_moves.push(to_check);
             }
         }
         if self.first_move && !already_called {

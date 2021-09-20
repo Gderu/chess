@@ -22,6 +22,9 @@ pub struct LogicManager {
     en_passant: Option<(i8, i8)>,
     black_king: (i8, i8),
     white_king: (i8, i8),
+    past_positions: Vec<(Vec<Vec<String>>, i8)>,
+    turns_since_capture: i8,
+    stop: bool,
 }
 
 impl LogicManager {
@@ -46,7 +49,20 @@ impl LogicManager {
         }
         board.push(LogicManager::create_back_line(true));
 
-        LogicManager { board , curr_selected: (-1, -1) , possible_moves: vec![] , en_passant: None, black_king: (0, 4), white_king: (7, 4)}
+        let mut res = LogicManager {
+            board,
+            curr_selected: (-1, -1),
+            possible_moves: vec![],
+            en_passant: None,
+            black_king: (0, 4),
+            white_king: (7, 4),
+            past_positions: vec![],
+            turns_since_capture: 0,
+            stop: false,
+        };
+        res.add_board_to_list();
+        res
+
     }
 
     //gets a reference to the board
@@ -56,6 +72,9 @@ impl LogicManager {
 
     //gets all possible moves for a piece at pos. Returns None if there is no piece there. Must be called before moving
     pub fn get_possible_moves(&mut self, pos: (i8, i8)) -> Option<&Vec<(i8, i8)>> {
+        if self.stop {
+            return None;
+        }
         if self.curr_selected != (-1, -1) {
             self.possible_moves.clear();
         }
@@ -138,10 +157,20 @@ impl LogicManager {
             }
         }
 
+        let was_piece_taken =  self.board[new_pos.0 as usize][new_pos.1 as usize].is_some();
+
         self.board[new_pos.0 as usize][new_pos.1 as usize] =
             Some(self.board[self.curr_selected.0 as usize][self.curr_selected.1 as usize].as_ref().unwrap().clone());
         self.board[self.curr_selected.0 as usize][self.curr_selected.1 as usize] = None;//moving the piece on the board
         self.curr_selected = (-1, -1);
+
+        if was_piece_taken {
+            self.turns_since_capture = 0;
+            self.past_positions.clear();
+        } else {
+            self.turns_since_capture += 1;
+            self.add_board_to_list();
+        }
         to_return
     }
 
@@ -169,6 +198,16 @@ impl LogicManager {
             .is_checkmate(&self.board, &self.en_passant, other_king_pos)
     }
 
+    pub fn is_draw(&self) -> bool {
+        if self.turns_since_capture >= 100 {
+            true
+        } else if self.past_positions.iter().find(|(_board, n)| *n >= 3).is_some() {
+            true
+        } else {
+            false
+        }
+    }
+
     pub fn can_move(&self) -> bool {
         self.curr_selected != (-1, -1)
     }
@@ -184,6 +223,14 @@ impl LogicManager {
         } else {
             None
         }
+    }
+
+    pub fn stop(&mut self) {
+        self.stop = true;
+    }
+
+    pub fn is_stop(&self) -> bool {
+        self.stop
     }
 
     fn get_piece(&self, pos: (i8, i8)) -> &Box<dyn Piece> {
@@ -207,8 +254,38 @@ impl LogicManager {
         vec![Rook::new((i, 0), color), Knight::new((i, 1), color), Bishop::new((i, 2), color), Queen::new((i, 3), color), King::new((i, 4), color), Bishop::new((i, 5), color), Knight::new((i, 6), color), Rook::new((i, 7), color)]
     }
 
-    fn is_pos_empty(&self, pos: (i8, i8)) -> bool {
-        self.board[pos.0 as usize][pos.1 as usize].is_none()
+    fn add_board_to_list(&mut self) {
+        let mut simplified_board = vec![];
+        for row in &self.board {
+            let mut simplified_row = vec![];
+            for sqr in row {
+                let mut to_add;
+                if let Some(piece) = sqr {
+                    to_add = match piece.piece_type() {
+                        PieceTypes::King => "k",
+                        PieceTypes::Queen => "q",
+                        PieceTypes::Rook => "r",
+                        PieceTypes::Bishop => "b",
+                        PieceTypes::Knight => "n",
+                        PieceTypes::Pawn => "p",
+                    }.to_string();
+                    to_add += match piece.color() {
+                        true => "w",
+                        false => "b",
+                    };
+                } else {
+                    to_add = " ".to_string();
+                }
+                simplified_row.push(to_add);
+            }
+            simplified_board.push(simplified_row);
+        }
+        let pos = self.past_positions.iter().position(|(b, _i)| b == &simplified_board);
+        if let Some(pos) = pos {
+            self.past_positions[pos].1 += 1;
+        } else {
+            self.past_positions.push((simplified_board, 1));
+        }
     }
 }
 
